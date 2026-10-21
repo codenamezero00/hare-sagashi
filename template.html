@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>晴れの日さがし</title>
+<style>
+  :root { --bg:#f7f7f4; --card:#fff; --ink:#222; --sub:#777; --line:#e3e3de; --accent:#2f7d4f; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"Hiragino Sans",sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:16px; background:var(--accent); color:#fff; }
+  header h1 { margin:0; font-size:20px; }
+  header p { margin:4px 0 0; font-size:12px; opacity:.85; }
+  main { max-width:760px; margin:0 auto; padding:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:12px; }
+  .controls { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
+  label { font-size:12px; color:var(--sub); display:block; }
+  select,input { width:100%; font-size:16px; padding:8px; border:1px solid var(--line); border-radius:8px; background:#fff; margin-top:2px; }
+  .check { display:flex; align-items:center; gap:6px; font-size:14px; color:var(--ink); margin-top:20px; }
+  .check input { width:auto; }
+  h2 { font-size:16px; margin:0 0 8px; }
+  .cal { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+  .dow { text-align:center; font-size:12px; color:var(--sub); }
+  .day { border-radius:8px; padding:4px 2px; text-align:center; min-height:64px; font-size:11px; line-height:1.3; border:1px solid transparent; }
+  .day b { display:block; font-size:14px; }
+  .day .pct { font-size:13px; font-weight:600; }
+  .day.off { opacity:.25; }
+  .day.best { border-color:#c9a400; box-shadow:0 0 0 2px #f4d34a inset; }
+  .day .fc { display:block; font-size:10px; margin-top:2px; }
+  .sat b { color:#2a5db0; } .sun b { color:#c0392b; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th,td { padding:6px 4px; border-bottom:1px solid var(--line); text-align:center; }
+  th { font-size:12px; color:var(--sub); font-weight:normal; }
+  .legend { display:flex; gap:6px; align-items:center; font-size:11px; color:var(--sub); margin-top:8px; flex-wrap:wrap; }
+  .legend span { width:18px; height:12px; border-radius:3px; display:inline-block; }
+  .note { font-size:12px; color:var(--sub); line-height:1.6; }
+</style>
+</head>
+<body>
+<header>
+  <h1>☀️ 晴れの日さがし</h1>
+  <p>過去20年（2006〜2025年）に、その日に雨が降った回数から、雨になりにくい日を探します</p>
+</header>
+<main>
+  <div class="card controls">
+    <div><label>場所</label><select id="city"></select></div>
+    <div><label>月</label><input type="month" id="month"></div>
+    <div><label>雨を数える時間</label>
+      <select id="mode"><option value="1">日中（9〜17時）</option><option value="0">1日全部</option></select></div>
+    <div><label>雨とみなす量</label>
+      <select id="thr"><option value="5">0.5mm以上（ぱらつきも）</option><option value="10" selected>1mm以上（傘がいる）</option><option value="50">5mm以上（しっかり雨）</option></select></div>
+    <div><label class="check"><input type="checkbox" id="wkend">土日だけ見る</label></div>
+  </div>
+
+  <div class="card">
+    <h2 id="calTitle"></h2>
+    <div class="cal" id="cal"></div>
+    <div class="legend">雨の確率（前後3日をならした値）：
+      <span style="background:#2f7d4f"></span>〜10%
+      <span style="background:#7bbf7f"></span>〜20%
+      <span style="background:#d6e9b8"></span>〜30%
+      <span style="background:#f1e3a6"></span>〜40%
+      <span style="background:#b9cde6"></span>40%〜
+      　<span style="box-shadow:0 0 0 2px #f4d34a inset"></span>おすすめ上位
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>雨になりにくい日ランキング</h2>
+    <table><thead><tr><th>順位</th><th>日付</th><th>雨の日</th><th>その日の確率</th><th>前後3日</th><th>降った日の平均</th></tr></thead>
+    <tbody id="rank"></tbody></table>
+  </div>
+
+  <div class="card note">
+    <b>見かた</b><br>
+    ・「雨の日 20年中3回」＝過去20年のその日付で、雨が降ったのが3回だったということです。<br>
+    ・1つの日付につき20年分しかないので、たまたまの差が出ます。並べる順番は、その日の確率と「前後3日」（その日を中心にした7日間の平均）を半分ずつ見て決めています。<br>
+    ・☂の数字は今の天気予報（16日先まで）の降水確率です。日にちを決めるときは過去の傾向で候補を絞って、直前は予報で確かめてください。<br>
+    ・データ：Open-Meteo（約10km四方の推定値。アメダスの実測とは少しずれることがあります）
+  </div>
+</main>
+<script>
+const DATA = /*DATA*/null;
+const $ = id => document.getElementById(id);
+const DOW = ["日","月","火","水","木","金","土"];
+let forecast = {};
+
+for (const name of Object.keys(DATA)) $("city").add(new Option(name, name));
+const now = new Date();
+const nm = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+$("month").value = `${nm.getFullYear()}-${String(nm.getMonth()+1).padStart(2,"0")}`;
+
+const slotOf = (m, d) => Math.round((Date.UTC(2000, m-1, d) - Date.UTC(2000, 0, 1)) / 864e5);
+
+// 日付の枠ごとに「雨の回数・年数・降った日の平均雨量」を出す
+function statsFor(city, mode, thr) {
+  const ys = Object.values(DATA[city].years);
+  const out = [];
+  for (let s = 0; s < 366; s++) {
+    let n = 0, rain = 0, sum = 0;
+    for (const y of ys) {
+      const v = y[mode][s];
+      if (v === null) continue;
+      n++;
+      if (v >= thr) { rain++; sum += y[0][s]; }
+    }
+    out.push({ n, rain, avg: rain ? sum / rain / 10 : 0 });
+  }
+  // 前後3日でならす（2/29は数が少ないので重みは年数どおり）
+  for (let s = 0; s < 366; s++) {
+    let n = 0, rain = 0;
+    for (let k = -3; k <= 3; k++) { const o = out[(s + k + 366) % 366]; n += o.n; rain += o.rain; }
+    out[s].smooth = rain / n;
+  }
+  return out;
+}
+
+function color(p) {
+  if (p < .10) return ["#2f7d4f", "#fff"];
+  if (p < .20) return ["#7bbf7f", "#123"];
+  if (p < .30) return ["#d6e9b8", "#123"];
+  if (p < .40) return ["#f1e3a6", "#123"];
+  return ["#b9cde6", "#123"];
+}
+
+function render() {
+  const city = $("city").value, mode = +$("mode").value, thr = +$("thr").value, wk = $("wkend").checked;
+  const [Y, M] = $("month").value.split("-").map(Number);
+  const st = statsFor(city, mode, thr);
+  const days = new Date(Y, M, 0).getDate();
+  const first = new Date(Y, M-1, 1).getDay();
+  const years = Object.keys(DATA[city].years).length;
+
+  const list = [];
+  for (let d = 1; d <= days; d++) {
+    const dow = new Date(Y, M-1, d).getDay();
+    const s = st[slotOf(M, d)];
+    const on = !wk || dow === 0 || dow === 6;
+    list.push({ d, dow, s, on, key: `${Y}-${String(M).padStart(2,"0")}-${String(d).padStart(2,"0")}` });
+  }
+  // その日自体の回数と前後3日を半分ずつ見て並べる
+  const score = x => (x.s.smooth + x.s.rain / x.s.n) / 2;
+  const ranked = list.filter(x => x.on).sort((a, b) => score(a) - score(b) || a.s.smooth - b.s.smooth);
+  const best = new Set(ranked.slice(0, 3).map(x => x.d));
+
+  $("calTitle").textContent = `${city}　${Y}年${M}月（過去${years}年分）`;
+  let h = DOW.map(x => `<div class="dow">${x}</div>`).join("") + "<div></div>".repeat(first);
+  for (const x of list) {
+    const [bg, fg] = color(x.s.smooth);
+    const fc = forecast[x.key] != null ? `<span class="fc">☂${forecast[x.key]}%</span>` : "";
+    const cls = ["day", x.dow === 6 ? "sat" : x.dow === 0 ? "sun" : "", x.on ? "" : "off", best.has(x.d) ? "best" : ""].join(" ");
+    h += `<div class="${cls}" style="background:${bg};color:${fg}"><b>${x.d}</b><span class="pct">${Math.round(x.s.smooth*100)}%</span><br>${x.s.rain}/${x.s.n}回${fc}</div>`;
+  }
+  $("cal").innerHTML = h;
+
+  $("rank").innerHTML = ranked.slice(0, 10).map((x, i) => `<tr>
+    <td>${i+1}</td><td>${M}/${x.d}(${DOW[x.dow]})</td>
+    <td>${x.s.n}年中${x.s.rain}回</td><td>${Math.round(x.s.rain/x.s.n*100)}%</td>
+    <td><b>${Math.round(x.s.smooth*100)}%</b></td><td>${x.s.rain ? x.s.avg.toFixed(1)+"mm" : "—"}</td></tr>`).join("");
+}
+
+async function loadForecast() {
+  forecast = {};
+  const c = DATA[$("city").value];
+  try {
+    const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${c.lat}&longitude=${c.lon}&daily=precipitation_probability_max&timezone=Asia%2FTokyo&forecast_days=16`);
+    const j = await r.json();
+    j.daily.time.forEach((t, i) => forecast[t] = j.daily.precipitation_probability_max[i]);
+  } catch (e) { /* 予報が取れなくても過去の統計だけで動く */ }
+  render();
+}
+
+["mode","thr","wkend","month"].forEach(id => $(id).addEventListener("change", render));
+$("city").addEventListener("change", loadForecast);
+render();
+loadForecast();
+</script>
+</body>
+</html>
